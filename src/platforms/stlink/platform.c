@@ -48,32 +48,22 @@ void platform_init(void)
 	rev = detect_rev();
 	SCS_DEMCR |= SCS_DEMCR_VC_MON_EN;
 	rcc_clock_setup_pll(&rcc_hse_configs[RCC_CLOCK_HSE8_72MHZ]);
+
 #ifdef BLUEPILL
 	led_idle_run = GPIO13;
 	nrst_pin = NRST_PIN_V1;
 #else
-	switch (rev) {
-	case 0:
-		led_idle_run = GPIO8;
-		nrst_pin = NRST_PIN_V1;
-		break;
-	case 0x101:
-		led_idle_run = GPIO9;
-		nrst_pin = NRST_PIN_CLONE;
-		break;
-	default:
-		led_idle_run = GPIO9;
-		nrst_pin = NRST_PIN_V2;
-		break;
-	}
+	/* CLONE MOD: Hardcode clone pins directly to bypass bad revision detection */
+	led_idle_run = GPIO9;        /* Typical clone LED pin */
+	nrst_pin = NRST_PIN_CLONE;   /* Use the dedicated clone reset pin mapping */
 #endif
+
 	/* Setup GPIO ports */
 	gpio_set_mode(TMS_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_INPUT_FLOAT, TMS_PIN);
 	gpio_set_mode(TCK_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, TCK_PIN);
 	gpio_set_mode(TDI_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, TDI_PIN);
 
 	platform_nrst_set_val(false);
-
 	gpio_set_mode(LED_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, led_idle_run);
 
 	/* Relocate interrupt vector table here */
@@ -81,15 +71,18 @@ void platform_init(void)
 	SCB_VTOR = (uintptr_t)&vector_table;
 
 	platform_timing_init();
-	if ((rev & 0xff) > 1U) /* Reconnect USB */
-		gpio_set(GPIOA, GPIO15);
+
+	/* CLONE MOD: Force GPIOA 15 high immediately during app-init 
+	   This breaks any USB state hang left behind by a messy replug */
+	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO15);
+	gpio_set(GPIOA, GPIO15);
+
 	blackmagic_usb_init();
 
 #ifdef SWIM_AS_UART
 	gpio_primary_remap(AFIO_MAPR_SWJ_CFG_FULL_SWJ, AFIO_MAPR_USART1_REMAP);
 #endif
 
-	/* Don't enable UART if we're being debugged. */
 	if (!(SCS_DEMCR & SCS_DEMCR_TRCENA))
 		aux_serial_init();
 	adc_init();
