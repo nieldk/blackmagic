@@ -32,7 +32,6 @@ SRC =              \
 	cortexa.c      \
 	cortexm.c      \
 	crc32.c        \
-	efm32.c        \
 	exception.c    \
 	gdb_if.c       \
 	gdb_main.c     \
@@ -40,34 +39,13 @@ SRC =              \
 	gdb_packet.c   \
 	gdb_reg.c      \
 	hex_utils.c    \
-	hc32l110.c     \
-	imxrt.c        \
 	jtag_devs.c    \
 	jtag_scan.c    \
-	lmi.c          \
-	lpc_common.c   \
-	lpc11xx.c      \
-	lpc17xx.c      \
-	lpc15xx.c      \
-	lpc40xx.c      \
-	lpc43xx.c      \
-	lpc546xx.c     \
-	lpc55xx.c      \
-	kinetis.c      \
 	main.c         \
 	maths_utils.c  \
 	morse.c        \
-	msp432e4.c     \
-	msp432p4.c     \
 	nrf51.c        \
-	nrf91.c        \
-	nxpke04.c      \
 	remote.c       \
-	rp.c           \
-	sam3x.c        \
-	sam4l.c        \
-	samd.c         \
-	samx5x.c       \
 	sfdp.c         \
 	spi.c          \
 	stm32f1.c      \
@@ -79,7 +57,6 @@ SRC =              \
 	stm32l0.c      \
 	stm32l4.c      \
 	stm32g0.c      \
-	renesas.c      \
 	target.c       \
 	target_flash.c \
 	target_probe.c
