@@ -288,9 +288,14 @@ void platform_init(void)
 	 * waiting for a host command, giving the host unlimited settling time -
 	 * now that wait is gone, so we give it back here instead). Boot time
 	 * isn't performance-sensitive, so erring long costs nothing real.
-	 * ~11ms before, now ~140ms at 72MHz. */
-	for (volatile uint32_t i = 0; i < 2500000U; ++i)
-		continue;
+	 *
+	 * Use the platform's SysTick-based millisecond timer (set up just above by
+	 * platform_timing_init()) rather than a cycle-counted busy loop. The old
+	 * loop's duration was tied to a hand-estimated 72MHz instruction timing and
+	 * to whatever the compiler did with it; platform_delay() gives a true,
+	 * clock-accurate 140ms regardless of optimisation level. 140ms clears the
+	 * USB host's disconnect debounce (~100ms typical) with comfortable margin. */
+	platform_delay(140U);
 	/* Release D+ back to floating/input so the USB peripheral's own transceiver
 	 * regains control of the line once blackmagic_usb_init() brings it up. */
 	gpio_set_mode(GPIOA, GPIO_MODE_INPUT, GPIO_CNF_INPUT_FLOAT, GPIO12);
