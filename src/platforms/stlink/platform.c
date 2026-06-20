@@ -45,25 +45,59 @@ int platform_hwversion(void)
 
 void platform_init(void)
 {
+	/*
+	 * The ST bootloader leaves the USB peripheral already initialised/enumerated
+	 * (as itself, in DFU mode) when it jumps to the application. Without forcing
+	 * a real electrical disconnect here, the host has no reason to notice the
+	 * handoff and keeps treating us as the bootloader it already saw, so it
+	 * never queries us for our actual (BMP) descriptors. This is lujji's fix
+	 * from "Installing Black Magic via ST-Link bootloader": reset the USB
+	 * peripheral, then directly force D+ (PA12) low as a plain GPIO long enough
+	 * for the host to register a disconnect, before handing the pin back to the
+	 * USB peripheral's own control.
+	 */
+	rcc_periph_reset_pulse(RST_USB);
+	rcc_periph_clock_enable(RCC_USB);
+	rcc_periph_clock_enable(RCC_GPIOA);
+	gpio_clear(GPIOA, GPIO12);
+	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
+			GPIO_CNF_OUTPUT_OPENDRAIN, GPIO12);
+	/* Hold D+ low long enough for the host to register a real disconnect. */
+	for (volatile uint32_t i = 0; i < 200000U; ++i)
+		continue;
+	/* Release D+ back to floating/input so the USB peripheral's own transceiver
+	 * regains control of the line once blackmagic_usb_init() brings it up. */
+	gpio_set_mode(GPIOA, GPIO_MODE_INPUT, GPIO_CNF_INPUT_FLOAT, GPIO12);
+
 	rev = detect_rev();
 	SCS_DEMCR |= SCS_DEMCR_VC_MON_EN;
 	rcc_clock_setup_pll(&rcc_hse_configs[RCC_CLOCK_HSE8_72MHZ]);
-
 #ifdef BLUEPILL
 	led_idle_run = GPIO13;
 	nrst_pin = NRST_PIN_V1;
 #else
-	/* CLONE MOD: Hardcode clone pins directly to bypass bad revision detection */
-	led_idle_run = GPIO9;        /* Typical clone LED pin */
-	nrst_pin = NRST_PIN_CLONE;   /* Use the dedicated clone reset pin mapping */
+	switch (rev) {
+	case 0:
+		led_idle_run = GPIO8;
+		nrst_pin = NRST_PIN_V1;
+		break;
+	case 0x101:
+		led_idle_run = GPIO9;
+		nrst_pin = NRST_PIN_CLONE;
+		break;
+	default:
+		led_idle_run = GPIO9;
+		nrst_pin = NRST_PIN_V2;
+		break;
+	}
 #endif
-
 	/* Setup GPIO ports */
 	gpio_set_mode(TMS_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_INPUT_FLOAT, TMS_PIN);
 	gpio_set_mode(TCK_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, TCK_PIN);
 	gpio_set_mode(TDI_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, TDI_PIN);
 
 	platform_nrst_set_val(false);
+
 	gpio_set_mode(LED_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, led_idle_run);
 
 	/* Relocate interrupt vector table here */
@@ -71,18 +105,15 @@ void platform_init(void)
 	SCB_VTOR = (uintptr_t)&vector_table;
 
 	platform_timing_init();
-
-	/* CLONE MOD: Force GPIOA 15 high immediately during app-init 
-	   This breaks any USB state hang left behind by a messy replug */
-	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO15);
-	gpio_set(GPIOA, GPIO15);
-
+	if ((rev & 0xff) > 1U) /* Reconnect USB */
+		gpio_set(GPIOA, GPIO15);
 	blackmagic_usb_init();
 
 #ifdef SWIM_AS_UART
 	gpio_primary_remap(AFIO_MAPR_SWJ_CFG_FULL_SWJ, AFIO_MAPR_USART1_REMAP);
 #endif
 
+	/* Don't enable UART if we're being debugged. */
 	if (!(SCS_DEMCR & SCS_DEMCR_TRCENA))
 		aux_serial_init();
 	adc_init();
