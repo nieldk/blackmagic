@@ -223,11 +223,25 @@ static void patch_bootloader_autoboot(void)
 
 void platform_init(void)
 {
+	/* 1. IMMEDIATELY DRIVE D+ LOW ON POWER-ON
+	 * We must clamp the D+ line hard to ground the microsecond the CPU executes instructions.
+	 * This hides the hardware pull-up resistor from the host PC while the MCU boots and
+	 * executes its one-time flash modification routine. Using Push-Pull violently overrides 
+	 * the clone's hardwired 1.5k resistor down to ~0V, which Open-Drain sometimes fails to do. */
+	rcc_periph_clock_enable(RCC_GPIOA);
+	gpio_clear(GPIOA, GPIO12);
+	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO12);
+
+	/* 2. Run the idempotent bootloader patch.
+	 * If this is a first-time boot, the flash write delay occurs safely while 
+	 * the host PC still thinks no device is plugged into the port. */
 	patch_bootloader_autoboot();
 
+	/* 3. Run standard system clock and peripheral setups */
 	rev = detect_rev();
 	SCS_DEMCR |= SCS_DEMCR_VC_MON_EN;
 	rcc_clock_setup_pll(&rcc_hse_configs[RCC_CLOCK_HSE8_72MHZ]);
+    
 #ifdef BLUEPILL
 	led_idle_run = GPIO13;
 	nrst_pin = NRST_PIN_V1;
@@ -247,13 +261,13 @@ void platform_init(void)
 		break;
 	}
 #endif
+
 	/* Setup GPIO ports */
 	gpio_set_mode(TMS_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_INPUT_FLOAT, TMS_PIN);
 	gpio_set_mode(TCK_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, TCK_PIN);
 	gpio_set_mode(TDI_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, TDI_PIN);
 
 	platform_nrst_set_val(false);
-
 	gpio_set_mode(LED_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, led_idle_run);
 
 	/* Relocate interrupt vector table here */
@@ -261,43 +275,22 @@ void platform_init(void)
 	SCB_VTOR = (uintptr_t)&vector_table;
 
 	platform_timing_init();
-	/*
-	 * The ST bootloader leaves the USB peripheral already initialised/enumerated
-	 * (as itself, in DFU mode) when it jumps to the application. Without forcing
-	 * a real electrical disconnect here, the host has no reason to notice the
-	 * handoff and keeps treating us as the bootloader it already saw, so it
-	 * never queries us for our actual (BMP) descriptors. This is lujji's fix
-	 * from "Installing Black Magic via ST-Link bootloader": reset the USB
-	 * peripheral, then directly force D+ (PA12) low as a plain GPIO long enough
-	 * for the host to register a disconnect, before handing the pin back to the
-	 * USB peripheral's own control. Done here, after the clock tree is fully
-	 * configured, rather than before it.
-	 */
+
 	if ((rev & 0xff) > 1U) /* Reconnect USB (genuine-hardware path, board-specific) */
 		gpio_set(GPIOA, GPIO15);
+
 	rcc_periph_reset_pulse(RST_USB);
 	rcc_periph_clock_enable(RCC_USB);
-	rcc_periph_clock_enable(RCC_GPIOA);
-	gpio_clear(GPIOA, GPIO12);
-	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
-			GPIO_CNF_OUTPUT_OPENDRAIN, GPIO12);
-	/* Hold D+ low long enough for the host to register a real disconnect.
-	 * Generous on purpose: the bootloader's own enumeration with the host may
-	 * still be settling when our patched bootloader jumps here almost
-	 * immediately after boot (previously it would sit idle indefinitely
-	 * waiting for a host command, giving the host unlimited settling time -
-	 * now that wait is gone, so we give it back here instead). Boot time
-	 * isn't performance-sensitive, so erring long costs nothing real.
-	 *
-	 * Use the platform's SysTick-based millisecond timer (set up just above by
-	 * platform_timing_init()) rather than a cycle-counted busy loop. The old
-	 * loop's duration was tied to a hand-estimated 72MHz instruction timing and
-	 * to whatever the compiler did with it; platform_delay() gives a true,
-	 * clock-accurate 140ms regardless of optimisation level. 140ms clears the
-	 * USB host's disconnect debounce (~100ms typical) with comfortable margin. */
+
+	/* 4. EXPLICIT DEBOUNCE DELAY
+	 * Hold the low clamp past the host root-hub disconnect debounce.
+	 * Now that SysTick is active and the clock tree is stable, this 140ms window
+	 * acts as a clean, definitive reset signal for the host controller. */
 	platform_delay(140U);
-	/* Release D+ back to floating/input so the USB peripheral's own transceiver
-	 * regains control of the line once blackmagic_usb_init() brings it up. */
+
+	/* 5. RELEASE THE LINE
+	 * Return PA12 to floating input so the hardware pull-up re-asserts.
+	 * The host PC marks a clean rising edge and initiates a flawless handshake. */
 	gpio_set_mode(GPIOA, GPIO_MODE_INPUT, GPIO_CNF_INPUT_FLOAT, GPIO12);
 	blackmagic_usb_init();
 
@@ -305,7 +298,6 @@ void platform_init(void)
 	gpio_primary_remap(AFIO_MAPR_SWJ_CFG_FULL_SWJ, AFIO_MAPR_USART1_REMAP);
 #endif
 
-	/* Don't enable UART if we're being debugged. */
 	if (!(SCS_DEMCR & SCS_DEMCR_TRCENA))
 		aux_serial_init();
 	adc_init();
