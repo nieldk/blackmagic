@@ -45,30 +45,6 @@ int platform_hwversion(void)
 
 void platform_init(void)
 {
-	/*
-	 * The ST bootloader leaves the USB peripheral already initialised/enumerated
-	 * (as itself, in DFU mode) when it jumps to the application. Without forcing
-	 * a real electrical disconnect here, the host has no reason to notice the
-	 * handoff and keeps treating us as the bootloader it already saw, so it
-	 * never queries us for our actual (BMP) descriptors. This is lujji's fix
-	 * from "Installing Black Magic via ST-Link bootloader": reset the USB
-	 * peripheral, then directly force D+ (PA12) low as a plain GPIO long enough
-	 * for the host to register a disconnect, before handing the pin back to the
-	 * USB peripheral's own control.
-	 */
-	rcc_periph_reset_pulse(RST_USB);
-	rcc_periph_clock_enable(RCC_USB);
-	rcc_periph_clock_enable(RCC_GPIOA);
-	gpio_clear(GPIOA, GPIO12);
-	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
-			GPIO_CNF_OUTPUT_OPENDRAIN, GPIO12);
-	/* Hold D+ low long enough for the host to register a real disconnect. */
-	for (volatile uint32_t i = 0; i < 200000U; ++i)
-		continue;
-	/* Release D+ back to floating/input so the USB peripheral's own transceiver
-	 * regains control of the line once blackmagic_usb_init() brings it up. */
-	gpio_set_mode(GPIOA, GPIO_MODE_INPUT, GPIO_CNF_INPUT_FLOAT, GPIO12);
-
 	rev = detect_rev();
 	SCS_DEMCR |= SCS_DEMCR_VC_MON_EN;
 	rcc_clock_setup_pll(&rcc_hse_configs[RCC_CLOCK_HSE8_72MHZ]);
@@ -105,8 +81,33 @@ void platform_init(void)
 	SCB_VTOR = (uintptr_t)&vector_table;
 
 	platform_timing_init();
-	if ((rev & 0xff) > 1U) /* Reconnect USB */
+	/*
+	 * The ST bootloader leaves the USB peripheral already initialised/enumerated
+	 * (as itself, in DFU mode) when it jumps to the application. Without forcing
+	 * a real electrical disconnect here, the host has no reason to notice the
+	 * handoff and keeps treating us as the bootloader it already saw, so it
+	 * never queries us for our actual (BMP) descriptors. This is lujji's fix
+	 * from "Installing Black Magic via ST-Link bootloader": reset the USB
+	 * peripheral, then directly force D+ (PA12) low as a plain GPIO long enough
+	 * for the host to register a disconnect, before handing the pin back to the
+	 * USB peripheral's own control. Done here, after the clock tree is fully
+	 * configured, rather than before it.
+	 */
+	if ((rev & 0xff) > 1U) /* Reconnect USB (genuine-hardware path, board-specific) */
 		gpio_set(GPIOA, GPIO15);
+	rcc_periph_reset_pulse(RST_USB);
+	rcc_periph_clock_enable(RCC_USB);
+	rcc_periph_clock_enable(RCC_GPIOA);
+	gpio_clear(GPIOA, GPIO12);
+	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
+			GPIO_CNF_OUTPUT_OPENDRAIN, GPIO12);
+	/* Hold D+ low long enough for the host to register a real disconnect.
+	 * Clock tree is now known/stable (72MHz), so this duration is well-defined. */
+	for (volatile uint32_t i = 0; i < 200000U; ++i)
+		continue;
+	/* Release D+ back to floating/input so the USB peripheral's own transceiver
+	 * regains control of the line once blackmagic_usb_init() brings it up. */
+	gpio_set_mode(GPIOA, GPIO_MODE_INPUT, GPIO_CNF_INPUT_FLOAT, GPIO12);
 	blackmagic_usb_init();
 
 #ifdef SWIM_AS_UART
