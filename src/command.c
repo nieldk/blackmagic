@@ -81,6 +81,9 @@ static bool cmd_debug_bmp(target_s *t, int argc, const char **argv);
 #if PC_HOSTED == 1
 static bool cmd_shutdown_bmda(target_s *t, int argc, const char **argv);
 #endif
+#ifdef PLATFORM_HAS_BOOTLOADER_RESTORE_CMD
+bool cmd_restore_bootloader(target_s *t, int argc, const char **argv);
+#endif
 
 const command_s cmd_list[] = {
 	{"version", cmd_version, "Display firmware version info"},
@@ -118,6 +121,10 @@ const command_s cmd_list[] = {
 #endif
 #if PC_HOSTED == 1
 	{"shutdown_bmda", cmd_shutdown_bmda, "Tell the BMDA server to shut down when the GDB connection closes"},
+#endif
+#ifdef PLATFORM_HAS_BOOTLOADER_RESTORE_CMD
+	{"restore_bootloader", cmd_restore_bootloader,
+		"Undo the cold-boot bootloader patch, restoring original (no-auto-launch) behavior"},
 #endif
 	{NULL, NULL, NULL},
 };
