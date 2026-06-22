@@ -38,6 +38,16 @@ extern bool debug_bmp;
 
 #define PLATFORM_IDENT "(ST-Link/v2) "
 
+/*
+ * This platform's app-side patch makes the genuine ST V2 bootloader launch
+ * unconditionally on every boot (no host command needed). This flag enables
+ * a matching `monitor restore_bootloader` command so the patch can be
+ * undone on demand, over USB only - no SWD, no opening the case.
+ */
+#define PLATFORM_HAS_BOOTLOADER_RESTORE_CMD
+struct target;
+bool cmd_restore_bootloader(struct target *t, int argc, const char **argv);
+
 /* Hardware definitions... */
 #define TDI_PORT GPIOA
 #define TMS_PORT GPIOB
