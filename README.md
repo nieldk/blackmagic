@@ -16,6 +16,80 @@ Serial Wire Output (SWO) allows the target to write tracing and logging to the h
 without using usb or serial port. Decoding SWO in the probe itself
 makes [SWO viewing as simple as connecting to a serial port](https://black-magic.org/usage/swo.html).
 
+## This fork: cold-boot auto-launch for ST-Link V2 clones
+
+Flashing BMP to a genuine-bootloader ST-Link V2 (or clone) normally means every
+cold power-on leaves the device sitting in the ST DFU bootloader, waiting
+indefinitely for an explicit host command (`stlink-tool` with no arguments, a
+`GO`) before it will launch the application at all. This fork patches that
+behavior away: once flashed and launched the first time, the running
+application applies a small, targeted patch to the bootloader itself so that
+**every subsequent boot launches BMP unconditionally, with zero host-tool
+involvement** — matching how genuine SEGGER J-Link OB firmware behaves on the
+same hardware.
+
+### What the patch actually does
+
+The V2 bootloader's launch decision lives in one specific comparison: it reads
+a DFU state byte and only calls the application-launch routine when that byte
+equals `7` (`dfuMANIFEST` — the state reached only after a host completes a
+download and explicitly signals it). On a true cold boot with nothing
+attached, that state is never reached, so the bootloader waits forever.
+
+The fix changes exactly that one comparison — two bytes, in bootloader page 8
+— from a conditional branch (`bne`) to a `nop`, so the launch call is reached
+unconditionally on every boot. Every other byte in that page, and the
+unrelated shared utility code living in the next page over (page 9), is
+written back identical to the original. Nothing else in the bootloader is
+touched.
+
+The patch is applied by the *running application itself*, once, the first
+time it boots after being flashed — not by any external tool. It's
+idempotent: it checks the live patch site first, and does nothing at all if
+it's already applied, so it's safe to leave running indefinitely.
+
+### Building and flashing
+
+Build exactly as you would for stock BMP on this platform:
+
+```console
+make PROBE_HOST=stlink ST_BOOTLOADER=1
+```
+
+Flash and launch once via `stlink-tool` as usual — this first boot is when the
+patch actually gets applied:
+
+```console
+stlink-tool blackmagic.bin
+stlink-tool          # GO — triggers the patch on this boot
+```
+
+After that, a plain power cycle (unplug/replug, no `stlink-tool` involved at
+all) brings the device up as BMP on its own.
+
+> **Note:** occasionally it takes a couple of replug attempts to come up
+> first-try rather than being instant and consistent every single time. The
+> cause is host-side USB power management (e.g. an XHCI controller or
+> per-device autosuspend dropping the connection during longer idle periods)
+> rather than anything in the firmware — disabling autosuspend
+> (`usbcore.autosuspend=-1`, or a scoped udev rule) resolves it if you hit it.
+
+### Undoing the patch
+
+A `monitor restore_bootloader` command is available over BMP's normal GDB
+connection — USB only, no SWD, no opening the case:
+
+```console
+(gdb) monitor restore_bootloader
+```
+
+This writes bootloader page 8 back to its exact original state, byte for
+byte. It checks the live patch site first and only acts if it reads exactly
+the known-patched value, so it's a safe no-op on a device that's already
+original or already restored. After running it, the bootloader reverts to
+stock behavior: it waits for an explicit `stlink-tool` GO command again, the
+same as unpatched ST-Link V2 hardware.
+
 ## Resources
 
 * [Official website](https://black-magic.org/index.html)
