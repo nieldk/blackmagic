@@ -74,7 +74,7 @@ int platform_hwversion(void)
 #define FLASH_SR     (*(volatile uint32_t *)(FPEC_BASE + 0x0C))
 #define FLASH_CR     (*(volatile uint32_t *)(FPEC_BASE + 0x10))
 #define FLASH_AR     (*(volatile uint32_t *)(FPEC_BASE + 0x14))
-#define FLASH_WRPR   (*(volatile uint32_t *)(FPEC_BASE + 0x1C))
+#define FLASH_WRPR   (*(volatile uint32_t *)(FPEC_BASE + 0x20))
 
 #define FLASH_KEY1   0x45670123U
 #define FLASH_KEY2   0xCDEF89ABU
